@@ -1155,9 +1155,9 @@ show_build_summary() {
 	_bget buildname buildname 2>/dev/null || :
 	now=$(clock -epoch)
 
-	calculate_elapsed_from_log ${now} ${log} || return 1
+	calculate_elapsed_from_log "${now}" "${log}" || return 1
 	elapsed=${_elapsed_time}
-	calculate_duration buildtime ${elapsed}
+	calculate_duration buildtime "${elapsed}"
 
 	printf "[${MASTERNAME}] [${buildname}] [${status}] \
 Queued: %-${queue_width}d ${COLOR_SUCCESS}Built: %-${queue_width}d \
@@ -3627,7 +3627,9 @@ calculate_elapsed_from_log() {
 	local log="$2"
 
 	[ -f "${log}/.poudriere.status" ] || return 1
-	start_end_time=$(stat -f '%B %m' ${log}/.poudriere.status.journal% 2>/dev/null || stat -f '%B %m' ${log}/.poudriere.status)
+	start_end_time=$(stat -f '%B %m' \
+	    "${log}/.poudriere.status.journal%" 2>/dev/null || \
+	    stat -f '%B %m' "${log}/.poudriere.status")
 	start_time=${start_end_time% *}
 	if status_is_stopped "${status}"; then
 		end_time=${start_end_time#* }
@@ -4194,7 +4196,7 @@ deps_fetch_vars() {
 	# triggers this with www/py-multidict since it tries to add DEPENDS_ARGS
 	# onto its multidict dependency but later finds that multidict is
 	# already forcing Python 3 and the DEPENDS_ARGS does nothing.
-	if ! was_a_testport_run && [ ${ALL} -eq 0 ] && \
+	if [ ${ALL} -eq 0 ] && \
 	    [ -n "${_origin_flavor}" ]; then
 		originspec_encode _default_originspec "${origin}" '' ''
 		shash_get originspec-pkgname "${_default_originspec}" \
@@ -5255,7 +5257,6 @@ gather_port_vars() {
 	msg "Gathering ports metadata"
 	bset status "gatheringportvars:"
 
-	:> "listed_pkgs"
 	:> "all_pkgs"
 	[ ${ALL} -eq 0 ] && :> "all_pkgbases"
 
@@ -5319,7 +5320,7 @@ gather_port_vars() {
 				if [ -d "${qorigin}" ]; then
 					rdep=
 				elif [ -n "${flavor}" ]; then
-					rdep="metadata ${flavor}"
+					rdep="metadata ${flavor} listed"
 				fi
 			fi
 
@@ -5504,6 +5505,7 @@ gather_port_vars_port() {
 	# which is also listed to build since the FLAVOR-specific one
 	# will be found superfluous later.  None of this is possible with -a
 	if [ ${ALL} -eq 0 ] && [ "${rdep%% *}" = "metadata" ]; then
+		# rdep is: metadata flavor original_rdep
 		if [ -z "${flavors}" ]; then
 			msg_debug "SKIPPING ${originspec} - no FLAVORS"
 			return 0
@@ -5511,7 +5513,8 @@ gather_port_vars_port() {
 		local queued_flavor queuespec
 
 		default_flavor="${flavors%% *}"
-		queued_flavor="${rdep#* }"
+		rdep="${rdep#* }"
+		queued_flavor="${rdep% *}"
 		[ "${queued_flavor}" = "${FLAVOR_DEFAULT}" ] && \
 		    queued_flavor="${default_flavor}"
 		# Check if we have the default FLAVOR sitting in the
@@ -5520,10 +5523,10 @@ gather_port_vars_port() {
 			msg_debug "SKIPPING ${originspec}"
 			return 0
 		fi
-		# We're keeping this metadata lookup as a listed one
+		# We're keeping this metadata lookup as its original rdep
 		# but we need to prevent forcing all FLAVORS to build
 		# later, so reset our flavor and originspec.
-		rdep="listed"
+		rdep="${rdep#* }"
 		origin_flavor="${queued_flavor}"
 		originspec_encode queuespec "${origin}" "${origin_dep_args}" \
 		    "${origin_flavor}"
@@ -5535,17 +5538,8 @@ gather_port_vars_port() {
 		rm -rf "fqueue/${queuespec%/*}!${queuespec#*/}"
 	fi
 
-	if was_a_bulk_run; then
-		_log_path log
-		echo "${origin} ${pkgname} ${rdep}" >> \
-		    "${log}/.poudriere.ports.queued"
-	fi
-
 	msg_debug "WILL BUILD ${originspec}"
-	echo "${pkgname} ${originspec}" >> "all_pkgs"
-	if [ "${rdep}" = "listed" ]; then
-		echo "${pkgname}" >> "listed_pkgs"
-	fi
+	echo "${pkgname} ${originspec} ${rdep}" >> "all_pkgs"
 	[ ${ALL} -eq 0 ] && echo "${pkgname%-*}" >> "all_pkgbases"
 
 	# Add all of the discovered FLAVORS into the flavorqueue if
@@ -5684,7 +5678,7 @@ gather_port_vars_process_depqueue() {
 		if [ ${ALL} -eq 0 ] && [ -z "${dep_args}" ]; then
 			if [ -n "${dep_flavor}" ]; then
 				queue=fqueue
-				rdep="metadata ${dep_flavor}"
+				rdep="metadata ${dep_flavor} ${origin}"
 			else
 				queue=gqueue
 				rdep="${origin}"
@@ -5718,7 +5712,7 @@ gather_port_vars_process_depqueue() {
 compute_deps() {
 	[ "${PWD}" = "${MASTERMNT}/.p" ] || \
 	    err 1 "compute_deps requires PWD=${MASTERMNT}/.p"
-	local pkgname originspec dep_pkgname
+	local pkgname originspec dep_pkgname _ignored
 
 	msg "Calculating ports order and dependencies"
 	bset status "computingdeps:"
@@ -5727,7 +5721,7 @@ compute_deps() {
 
 	clear_dep_fatal_error
 	parallel_start
-	while read pkgname originspec; do
+	while read pkgname originspec _ignored; do
 		parallel_run compute_deps_pkg "${pkgname}" "${originspec}" || \
 			set_dep_fatal_error
 	done < "all_pkgs"
@@ -5759,7 +5753,7 @@ compute_deps_pkg() {
 	[ $# -ne 2 ] && eargs compute_deps_pkg pkgname originspec
 	local pkgname="$1"
 	local originspec="$2"
-	local pkg_pooldir deps dep_pkgname dep_originspec dep_origin
+	local pkg_pooldir deps dep_pkgname dep_originspec dep_origin dep_flavor
 	local raw_deps d key dpath dep_real_pkgname err_type
 
 	# Safe to remove pkgname-deps now, it won't be needed later.
@@ -5774,10 +5768,10 @@ compute_deps_pkg() {
 	for dep_originspec in ${deps}; do
 		if ! get_pkgname_from_originspec "${dep_originspec}" \
 		    dep_pkgname; then
-			[ ${ALL} -eq 0 ] && \
-			    err 1 "compute_deps_pkg failed to lookup pkgname for ${dep_originspec} processing package ${pkgname}"
 			originspec_decode "${dep_originspec}" dep_origin '' ''
-			err 1 "compute_deps_pkg failed to lookup pkgname for ${dep_originspec} processing package ${pkgname} -- Is SUBDIR+=${dep_originspec#*/} missing in ${dep_originspec%/*}/Makefile?"
+			[ ${ALL} -eq 0 ] && \
+			    err 1 "compute_deps_pkg failed to lookup pkgname for ${dep_originspec} processing package ${pkgname} -- Does ${dep_origin} provide the '${dep_flavor}' FLAVOR?"
+			err 1 "compute_deps_pkg failed to lookup pkgname for ${dep_originspec} processing package ${pkgname} -- Is SUBDIR+=${dep_originspec#*/} missing in ${dep_originspec%/*}/Makefile and does the port provide the '${dep_flavor}' FLAVOR?"
 		fi
 		msg_debug "compute_deps_pkg: Will build ${dep_originspec} for ${pkgname}"
 		:> "${pkg_pooldir}/${dep_pkgname}"
@@ -5967,14 +5961,16 @@ _listed_ports() {
 				while read origin; do
 					# Skip blank lines and comments
 					[ -z "${origin%%#*}" ] && continue
-					# Remove trailing slash for historical reasons.
+					# Remove excess slashes for mistakes
+					origin="${origin#/}"
 					echo "${origin%/}"
 				done < "${file}"
 			done
 		else
 			# Ports specified on cmdline
 			for origin in ${LISTPORTS}; do
-				# Remove trailing slash for historical reasons.
+				# Remove excess slashes for mistakes
+				origin="${origin#/}"
 				echo "${origin%/}"
 			done
 		fi
@@ -6009,7 +6005,7 @@ _all_pkgnames_for_origin() {
 }
 
 listed_pkgnames() {
-	cat "${MASTERMNT}/.p/listed_pkgs"
+	awk '$3 == "listed" { print $1 }' "${MASTERMNT}/.p/all_pkgs"
 }
 
 # Pkgname was in queue
@@ -6038,14 +6034,14 @@ pkgname_is_listed() {
 	[ ${ALL} -eq 1 ] && return 0
 
 	awk -vpkgname="${pkgname}" '
-	    $1 == pkgname {
+	    $3 == "listed" && $1 == pkgname {
 		found=1
 		exit 0
 	    }
 	    END {
 		if (found != 1)
 			exit 1
-	    }' "${MASTERMNT}/.p/listed_pkgs"
+	    }' "${MASTERMNT}/.p/all_pkgs"
 }
 
 # PKGBASE was requested to be built, or is needed by a port requested to be built
@@ -6293,12 +6289,32 @@ prepare_ports() {
 	fi
 
 	if was_a_testport_run; then
-		local dep_originspec
+		local dep_originspec dep_origin dep_flavor dep_ret
 
 		[ -z "${ORIGINSPEC}" ] && \
 		    err 1 "testport+prepare_ports requires ORIGINSPEC set"
+		if have_ports_feature FLAVORS; then
+			# deps_fetch_vars really wants to have the main port
+			# cached before being given a FLAVOR.
+			originspec_decode "${ORIGINSPEC}" dep_origin \
+			    '' dep_flavor
+			if [ -n "${dep_flavor}" ]; then
+				deps_fetch_vars "${dep_origin}" LISTPORTS \
+				    PKGNAME DEPENDS_ARGS FLAVOR FLAVORS
+			fi
+		fi
+		dep_ret=0
 		deps_fetch_vars "${ORIGINSPEC}" LISTPORTS PKGNAME \
-		    DEPENDS_ARGS FLAVOR FLAVORS
+		    DEPENDS_ARGS FLAVOR FLAVORS || dep_ret=$?
+		case ${dep_ret} in
+		0) ;;
+		# Non-fatal duplicate should be ignored
+		2) ;;
+		# Fatal error
+		*)
+			err ${ret} "deps_fetch_vars failed for ${ORIGINSPEC}"
+			;;
+		esac
 		for dep_originspec in $(listed_ports); do
 			msg_verbose "${COLOR_PORT}${ORIGINSPEC}${COLOR_RESET} depends on ${COLOR_PORT}${dep_originspec}"
 		done
@@ -6483,6 +6499,16 @@ prepare_ports() {
 			was_a_testport_run && \
 			    nbq=$((${nbq} + 1))
 			bset stats_queued ${nbq##* }
+
+			# Generate ports.queued list after the queue was
+			# trimmed.
+			local _originspec _pkgname _rdep tmp
+			tmp=$(TMPDIR="${log}" mktemp -ut .queued)
+			while read _pkgname _originspec _rdep; do
+				[ -d "deps/${_pkgname}" ] && \
+				    echo "${_originspec} ${_pkgname} ${_rdep}"
+			done < "all_pkgs" > "${tmp}"
+			mv -f "${tmp}" "${log}/.poudriere.ports.queued"
 		fi
 
 		# Create a pool of ready-to-build from the deps pool
@@ -6553,7 +6579,7 @@ load_priorities_tsortD() {
 }
 
 load_priorities_ptsort() {
-	local priority pkgname originspec pkg_boost origin
+	local priority pkgname originspec pkg_boost origin _ignored
 	local - # Keep set -f local
 
 	set -f # for PRIORITY_BOOST
@@ -6561,7 +6587,7 @@ load_priorities_ptsort() {
 	awk '{print $2 " " $1}' "pkg_deps" > "pkg_deps.ptsort"
 
 	# Add in boosts before running ptsort
-	while read pkgname originspec; do
+	while read pkgname originspec _ignored; do
 		# Does this pkg have an override?
 		for pkg_boost in ${PRIORITY_BOOST}; do
 			case ${pkgname%-*} in

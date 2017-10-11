@@ -93,3 +93,30 @@ assert_list "01" "Expected 01 - right"
 
 list_remove LIST 01
 assert_list "" "Expected blank - right"
+
+# Test eval parsing
+LIST=
+list_add LIST 01
+list_add LIST "02;"
+list_add LIST "03"
+list_remove LIST 03
+assert_list "01 02;" "Parsing error"
+
+# Test subst parsing
+LIST=
+list_add LIST 01
+list_add LIST "0*"
+assert_list "01 0*"
+list_add LIST "/*"
+assert_list "01 0* /*"
+
+list_remove LIST "0*"
+assert_list "01 /*"
+
+list_remove LIST "/*"
+assert_list "01"
+
+# Test removing of duplicates causing duplicate items of unremoved
+LIST="01 02 03 04 03 "
+list_remove LIST 03
+assert_list "01 02 03 04"

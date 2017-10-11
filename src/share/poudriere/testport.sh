@@ -189,6 +189,9 @@ export POUDRIERE_BUILD_TYPE=bulk
 
 jail_start ${JAILNAME} ${PTNAME} ${SETNAME}
 
+injail /usr/bin/make -C ${PORTSDIR}/${ORIGIN} maintainer ECHO_CMD=true || \
+    err 1 "Port is broken"
+
 if [ $CONFIGSTR -eq 1 ]; then
 	command -v dialog4ports >/dev/null 2>&1 || err 1 "You must have ports-mgmt/dialog4ports installed on the host to use -c."
 	PORTSDIR=${portsdir} \
@@ -231,7 +234,9 @@ commit_packages
 bset_job_status "testing" "${ORIGIN}"
 
 LOCALBASE=`injail /usr/bin/make -C ${PORTSDIR}/${ORIGIN} -VLOCALBASE`
+[ -n "${LOCALBASE}" ] || err 1 "Port has empty LOCALBASE?"
 : ${PREFIX:=$(injail /usr/bin/make -C ${PORTSDIR}/${ORIGIN} -VPREFIX)}
+[ -n "${PREFIX}" ] || err 1 "Port has empty PREFIX?"
 if [ "${USE_PORTLINT}" = "yes" ]; then
 	[ ! -x `command -v portlint` ] &&
 		err 2 "First install portlint if you want USE_PORTLINT to work as expected"
@@ -273,8 +278,12 @@ ret=0
 # Don't show timestamps in msg() which goes to logs, only job_msg()
 # which goes to master
 NO_ELAPSED_IN_MSG=1
+TIME_START_JOB=$(clock -monotonic)
 build_port "${ORIGINSPEC}" || ret=$?
 unset NO_ELAPSED_IN_MSG
+
+now=$(clock -monotonic)
+elapsed=$((${now} - ${TIME_START_JOB}))
 
 if [ ${ret} -ne 0 ]; then
 	if [ ${ret} -eq 2 ]; then
@@ -292,7 +301,7 @@ if [ ${ret} -ne 0 ]; then
 	errortype=$(/bin/sh ${SCRIPTPREFIX}/processonelog.sh \
 		${log}/logs/errors/${PKGNAME}.log \
 		2> /dev/null)
-	badd ports.failed "${ORIGIN} ${PKGNAME} ${failed_phase} ${errortype}"
+	badd ports.failed "${ORIGIN} ${PKGNAME} ${failed_phase} ${errortype} ${elapsed}"
 	update_stats || :
 
 	if [ ${INTERACTIVE_MODE} -eq 0 ]; then
@@ -304,7 +313,7 @@ if [ ${ret} -ne 0 ]; then
 		exit 1
 	fi
 else
-	badd ports.built "${ORIGIN} ${PKGNAME}"
+	badd ports.built "${ORIGIN} ${PKGNAME} ${elapsed}"
 	if [ -f ${MASTERMNT}${PORTSDIR}/${ORIGIN}/.keep ]; then
 		save_wrkdir ${MASTERMNT} "${PKGNAME}" "${PORTSDIR}/${ORIGIN}" \
 		    "noneed" || :

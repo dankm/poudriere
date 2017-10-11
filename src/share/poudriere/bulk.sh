@@ -245,7 +245,7 @@ if [ ${DRY_RUN} -eq 1 ]; then
 			cat "${MASTERMNT}/.p/all_pkgs"
 		} | sort -u | \
 			awk '$2 == "" { pkg = $1 } $2 != "" { if ($1 == pkg) { print } }' | \
-			while read pkgname originspec; do
+			while read pkgname originspec _ignored; do
 			# Trim away DEPENDS_ARGS for display
 			originspec_decode "${originspec}" origin '' flavor
 			originspec_encode originspec "${origin}" '' "${flavor}"
