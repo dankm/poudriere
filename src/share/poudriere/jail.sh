@@ -188,7 +188,7 @@ update_version_env() {
 
 	# Tell pkg(8) to not use /bin/sh for the ELF ABI since it is native.
 	[ ${QEMU_EMULATING} -eq 1 ] && \
-	    login_env="${login_env},ABI_FILE=\/usr\/lib\/crt1.o"
+	    login_env="${login_env},ABI_FILE=\/rescue\/sh"
 
 	# Check TARGET=i386 not TARGET_ARCH due to pc98/i386
 	need_cross_build "${REALARCH}" "${ARCH}" && \
