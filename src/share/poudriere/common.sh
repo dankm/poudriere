@@ -2103,7 +2103,7 @@ need_cross_build() {
 }
 
 _jlock() {
-	setvar "$1" "/var/run/poudriere/poudriere.${MASTERNAME}.lock"
+	setvar "$1" "${SHARED_LOCK_DIR}/poudriere.${MASTERNAME}.lock"
 }
 
 lock_jail() {
@@ -2111,7 +2111,7 @@ lock_jail() {
 
 	_jlock jlock
 	jlockf="${jlock}/pid"
-	mkdir -p /var/run/poudriere >/dev/null 2>&1 || :
+	mkdir -p "${SHARED_LOCK_DIR}" >/dev/null 2>&1 || :
 	# Ensure no other processes are trying to start this jail
 	if ! mkdir "${jlock}" 2>/dev/null; then
 		if [ -d "${jlock}" ]; then
@@ -4719,8 +4719,8 @@ ensure_pkg_installed() {
 		cp -f /usr/local/sbin/pkg-static "${mnt}/.p/pkg-static"
 		return 0
 	fi
-	[ -e ${MASTERMNT}/packages/Latest/pkg.txz ] || return 1 #pkg missing
-	injail tar xf /packages/Latest/pkg.txz -C / \
+	[ -e ${MASTERMNT}/packages/Latest/pkg.${PKG_EXT} ] || return 1 #pkg missing
+	injail tar xf /packages/Latest/pkg.${PKG_EXT} -C / \
 		-s ",/.*/,.p/,g" "*/pkg-static"
 	return 0
 }
@@ -5293,7 +5293,7 @@ pkgqueue_clean_rdeps() {
 			# clean_pool() in common.sh will pick this up and add to SKIPPED
 			echo "${dep_pkgname}"
 
-			clean_pool ${dep_pkgname} "" "${clean_rdepends}"
+			pkgqueue_clean_pool ${dep_pkgname} "${clean_rdepends}"
 		done
 	else
 		for dep_dir in ${rdep_dir}/*; do
@@ -5470,6 +5470,14 @@ pkgqueue_dir() {
 	setvar "${var_return}" "$(printf "%.1s/%s" "${dir}" "${dir}")"
 }
 
+slock_acquire() {
+	[ $# -ge 1 ] || eargs slock_acquire lockname [waittime]
+
+	mkdir -p "${SHARED_LOCK_DIR}" >/dev/null 2>&1 || :
+	POUDRIERE_TMPDIR="${SHARED_LOCK_DIR}" MASTERNAME=poudriere-shared \
+	    lock_acquire "$@"
+}
+
 lock_acquire() {
 	[ $# -ge 1 ] || eargs lock_acquire lockname [waittime]
 	local lockname="$1"
@@ -5488,6 +5496,12 @@ lock_acquire() {
 
 	# Delay TERM/INT while holding the lock
 	critical_start
+}
+
+slock_release() {
+	[ $# -ne 1 ] && eargs slock_release lockname
+	POUDRIERE_TMPDIR="${SHARED_LOCK_DIR}" MASTERNAME=poudriere-shared \
+	    lock_release "$@"
 }
 
 lock_release() {
@@ -5833,79 +5847,88 @@ gather_port_vars() {
 	until dirempty dqueue && dirempty gqueue && dirempty mqueue && \
 	    dirempty fqueue; do
 		# Process all newly found deps into the gatherqueue
-		:> "${qlist}"
-		clear_dep_fatal_error
-		dirempty dqueue || msg_debug "Processing depqueue"
-		parallel_start
-		for qorigin in dqueue/*; do
-			case "${qorigin}" in
+		if ! dirempty dqueue; then
+			msg_debug "Processing depqueue"
+			:> "${qlist}"
+			clear_dep_fatal_error
+			parallel_start
+			for qorigin in dqueue/*; do
+				case "${qorigin}" in
 				"dqueue/*") break ;;
-			esac
-			echo "${qorigin}" >> "${qlist}"
-			origin="${qorigin#*/}"
-			# origin is really originspec, but fixup
-			# the substitued '/'
-			originspec="${origin%!*}/${origin#*!}"
-			parallel_run \
-			    gather_port_vars_process_depqueue \
-			    "${originspec}" || \
-			    set_dep_fatal_error
-		done
-		if ! parallel_stop || check_dep_fatal_error; then
-			err 1 "Fatal errors encountered processing gathered ports metadata"
+				esac
+				echo "${qorigin}" >> "${qlist}"
+				origin="${qorigin#*/}"
+				# origin is really originspec, but fixup
+				# the substitued '/'
+				originspec="${origin%!*}/${origin#*!}"
+				parallel_run \
+				    gather_port_vars_process_depqueue \
+				    "${originspec}" || \
+				    set_dep_fatal_error
+			done
+			if ! parallel_stop || check_dep_fatal_error; then
+				err 1 "Fatal errors encountered processing gathered ports metadata"
+			fi
+			cat "${qlist}" | tr '\n' '\000' | xargs -0 rmdir
 		fi
-		cat "${qlist}" | tr '\n' '\000' | xargs -0 rmdir
 
 		# Now process the gatherqueue
 
 		# Now rerun until the work queue is empty
 		# XXX: If the initial run were to use an efficient work queue then
 		#      this could be avoided.
-		:> "${qlist}"
-		clear_dep_fatal_error
-		parallel_start
-		dirempty gqueue || msg_debug "Processing gatherqueue"
-		for qorigin in gqueue/*; do
-			case "${qorigin}" in
+		if ! dirempty gqueue; then
+			msg_debug "Processing gatherqueue"
+			:> "${qlist}"
+			clear_dep_fatal_error
+			parallel_start
+			for qorigin in gqueue/*; do
+				case "${qorigin}" in
 				"gqueue/*") break ;;
-			esac
-			echo "${qorigin}" >> "${qlist}"
-			origin="${qorigin#*/}"
-			# origin is really originspec, but fixup
-			# the substitued '/'
-			originspec="${origin%!*}/${origin#*!}"
-			read_line rdep "${qorigin}/rdep" || \
-			    err 1 "gather_port_vars: Failed to read rdep for ${originspec}"
-			parallel_run \
-			    prefix_stderr_quick \
-			    "(${COLOR_PORT}${originspec}${COLOR_RESET})${COLOR_WARN}" \
-			    gather_port_vars_port \
-			    "${originspec}" "${rdep}" || \
-			    set_dep_fatal_error
-		done
-		if ! parallel_stop || check_dep_fatal_error; then
-			err 1 "Fatal errors encountered gathering ports metadata"
+				esac
+				echo "${qorigin}" >> "${qlist}"
+				origin="${qorigin#*/}"
+				# origin is really originspec, but fixup
+				# the substitued '/'
+				originspec="${origin%!*}/${origin#*!}"
+				read_line rdep "${qorigin}/rdep" || \
+				    err 1 "gather_port_vars: Failed to read rdep for ${originspec}"
+				parallel_run \
+				    prefix_stderr_quick \
+				    "(${COLOR_PORT}${originspec}${COLOR_RESET})${COLOR_WARN}" \
+				    gather_port_vars_port \
+				    "${originspec}" "${rdep}" || \
+				    set_dep_fatal_error
+			done
+			if ! parallel_stop || check_dep_fatal_error; then
+				err 1 "Fatal errors encountered gathering ports metadata"
+			fi
+			cat "${qlist}" | tr '\n' '\000' | xargs -0 rm -rf
 		fi
-		cat "${qlist}" | tr '\n' '\000' | xargs -0 rm -rf
 
 		if ! dirempty gqueue || ! dirempty dqueue; then
 			continue
 		fi
-		dirempty mqueue || msg_debug "Processing metaqueue"
-		find mqueue -depth 1 -print0 | \
-		    xargs -J % -0 mv % gqueue/ || \
-		    err 1 "Failed moving mqueue items to gqueue"
+		if ! dirempty mqueue; then
+			msg_debug "Processing metaqueue"
+			find mqueue -depth 1 -print0 | \
+			    xargs -J % -0 mv % gqueue/ || \
+			    err 1 "Failed moving mqueue items to gqueue"
+		fi
 		if ! dirempty gqueue; then
 			continue
 		fi
 		# Process flavor queue to lookup newly discovered originspecs
-		dirempty fqueue || msg_debug "Processing flavorqueue"
-		# Just move all items to the gatherqueue.  We've looked up
-		# the default flavor for each of these origins already and
-		# can now try to identify alt flavors for the origins.
-		find fqueue -depth 1 -print0 | \
-		    xargs -J % -0 mv % gqueue/ || \
-		    err 1 "Failed moving fqueue items to gqueue"
+		if ! dirempty fqueue; then
+			msg_debug "Processing flavorqueue"
+			# Just move all items to the gatherqueue.  We've
+			# looked up the default flavor for each of these
+			# origins already and can now try to identify alt
+			# flavors for the origins.
+			find fqueue -depth 1 -print0 | \
+			    xargs -J % -0 mv % gqueue/ || \
+			    err 1 "Failed moving fqueue items to gqueue"
+		fi
 	done
 
 	if ! rmdir gqueue || ! rmdir dqueue || ! rmdir mqueue || \
@@ -6547,8 +6570,8 @@ _listed_ports() {
 				set_dep_fatal_error
 				continue
 			fi
-			origin="${new_origin}"
-			originspec_encode originspec "${origin}" '' "${flavor}"
+			originspec="${new_origin}"
+			originspec_decode "${originspec}" origin '' flavor
 		else
 			unset new_origin
 		fi
@@ -7132,7 +7155,7 @@ prepare_ports() {
 		echo "${BUILDNAME}" > "${PACKAGES}/.buildname"
 
 	fi
-	unset P_PYTHON_DEFAULT_VERSION P_PYTHON3_DEFAULT
+	unset P_PYTHON_MAJOR_VER P_PYTHON_DEFAULT_VERSION P_PYTHON3_DEFAULT
 
 	return 0
 }
@@ -7409,11 +7432,11 @@ build_repo() {
 	cp ${MASTERMNT}/tmp/packages/* ${PACKAGES}/
 
 	# Sign the ports-mgmt/pkg package for bootstrap
-	if [ -e "${PACKAGES}/Latest/pkg.txz" ]; then
+	if [ -e "${PACKAGES}/Latest/pkg.${PKG_EXT}" ]; then
 		if [ -n "${SIGNING_COMMAND}" ]; then
-			sign_pkg fingerprint "${PACKAGES}/Latest/pkg.txz"
+			sign_pkg fingerprint "${PACKAGES}/Latest/pkg.${PKG_EXT}"
 		elif [ -n "${PKG_REPO_SIGNING_KEY}" ]; then
-			sign_pkg pubkey "${PACKAGES}/Latest/pkg.txz"
+			sign_pkg pubkey "${PACKAGES}/Latest/pkg.${PKG_EXT}"
 		fi
 	fi
 }
@@ -7695,6 +7718,7 @@ fi
 : ${WATCHDIR:=${POUDRIERE_DATA}/queue}
 : ${PIDFILE:=${POUDRIERE_DATA}/daemon.pid}
 : ${QUEUE_SOCKET:=/var/run/poudriered.sock}
+: ${SHARED_LOCK_DIR:=/var/run/poudriere}
 : ${PORTBUILD_UID:=65532}
 : ${PORTBUILD_GID:=${PORTBUILD_UID}}
 : ${PORTBUILD_USER:=nobody}
