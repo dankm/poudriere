@@ -154,6 +154,7 @@ rename_SOURCES=		src/libexec/poudriere/rename/rename.c
 rm_SOURCES=		src/libexec/poudriere/rm/rm.c
 timeout_SOURCES=	src/libexec/poudriere/timeout/timeout.c
 timestamp_SOURCES=	src/libexec/poudriere/timestamp/timestamp.c
+timestamp_LDADD=	-lpthread
 tsort_SOURCES=		src/libexec/poudriere/tsort/tsort.c
 
 sh_CFLAGS=		-DSHELL -std=gnu99 ${sh_hist_CFLAGS} \
@@ -201,7 +202,6 @@ CLEANFILES+=		\
 			src/poudriere-sh/builtins.h \
 			src/poudriere-sh/shell.h
 sh_SOURCES+=		\
-			src/libexec/poudriere/cachec/cachec.c \
 			src/libexec/poudriere/clock/clock.c \
 			src/libexec/poudriere/dirempty/dirempty.c \
 			src/libexec/poudriere/locked_mkdir/locked_mkdir.c \
@@ -221,7 +221,8 @@ sh_SOURCES+=		\
 sh_CFLAGS+=		-I$(top_srcdir)/src/poudriere-sh \
 			-I$(top_builddir)/src/poudriere-sh
 # cachec
-sh_LDADD+=		-lrt
+#sh_SOURCES+=		src/libexec/poudriere/cachec/cachec.c
+#sh_LDADD+=		-lrt
 src/poudriere-sh/builtins.def: $(top_srcdir)/external/sh/builtins.def \
     $(top_srcdir)/src/poudriere-sh/builtins-poudriere.def
 	cat $^${.ALLSRC} > $@

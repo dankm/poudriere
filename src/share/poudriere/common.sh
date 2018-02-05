@@ -4112,92 +4112,6 @@ stop_build() {
 	buildlog_stop "${pkgname}" "${originspec}" ${build_failed}
 }
 
-prefix_stderr_quick() {
-	local -; set +x
-	local extra="$1"
-	local MSG_NESTED_STDERR
-	shift 1
-
-	{
-		{
-			MSG_NESTED_STDERR=1
-			"$@"
-		} 2>&1 1>&3 | {
-			setproctitle "${PROC_TITLE} (prefix_stderr_quick)"
-			while read -r line; do
-				msg_warn "${extra}: ${line}"
-			done
-		}
-	} 3>&1
-}
-
-prefix_stderr() {
-	local extra="$1"
-	shift 1
-	local prefixpipe prefixpid ret
-	local MSG_NESTED_STDERR
-
-	prefixpipe=$(mktemp -ut prefix_stderr.pipe)
-	mkfifo "${prefixpipe}"
-	(
-		set +x
-		setproctitle "${PROC_TITLE} (prefix_stderr)"
-		while read -r line; do
-			msg_warn "${extra}: ${line}"
-		done
-	) < ${prefixpipe} &
-	prefixpid=$!
-	exec 4>&2
-	exec 2> "${prefixpipe}"
-	unlink "${prefixpipe}"
-
-	MSG_NESTED_STDERR=1
-	ret=0
-	"$@" || ret=$?
-
-	exec 2>&4 4>&-
-	wait ${prefixpid}
-
-	return ${ret}
-}
-
-prefix_stdout() {
-	local extra="$1"
-	shift 1
-	local prefixpipe prefixpid ret
-	local MSG_NESTED
-
-	prefixpipe=$(mktemp -ut prefix_stdout.pipe)
-	mkfifo "${prefixpipe}"
-	(
-		set +x
-		setproctitle "${PROC_TITLE} (prefix_stdout)"
-		while read -r line; do
-			msg "${extra}: ${line}"
-		done
-	) < ${prefixpipe} &
-	prefixpid=$!
-	exec 3>&1
-	exec > "${prefixpipe}"
-	unlink "${prefixpipe}"
-
-	MSG_NESTED=1
-	ret=0
-	"$@" || ret=$?
-
-	exec 1>&3 3>&-
-	wait ${prefixpid}
-
-	return ${ret}
-}
-
-prefix_output() {
-	local extra="$1"
-	shift 1
-
-	prefix_stderr "${extra}" prefix_stdout "${extra}" "$@"
-}
-
 : ${ORIGINSPEC_SEP:="@"}
 : ${FLAVOR_DEFAULT:="-"}
 : ${FLAVOR_ALL:="all"}
@@ -5709,7 +5623,6 @@ set_dep_fatal_error() {
 }
 
 clear_dep_fatal_error() {
-	: ${DEP_FATAL_ERROR_FILE:=dep_fatal_error}
 	unset DEP_FATAL_ERROR
 	unlink ${DEP_FATAL_ERROR_FILE} 2>/dev/null || :
 	export ERRORS_ARE_DEP_FATAL=1
@@ -7802,6 +7715,11 @@ if [ -n "${MAX_MEMORY}" ]; then
 fi
 : ${MAX_FILES:=1024}
 : ${DEFAULT_MAX_FILES:=${MAX_FILES}}
+: ${DEP_FATAL_ERROR_FILE:=dep_fatal_error}
+HAVE_FDESCFS=0
+if [ "$(mount -t fdescfs | awk '$3 == "/dev/fd" {print $3}')" = "/dev/fd" ]; then
+	HAVE_FDESCFS=1
+fi
 
 TIME_START=$(clock -monotonic)
 EPOCH_START=$(clock -epoch)
