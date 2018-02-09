@@ -48,7 +48,9 @@ It can also be used to test a single port.
 accepts a global option:
 .Bl -tag -width "-f conffile"
 .It Fl e Ar etcdir
-Path to the directory where poudriere will find its configuration data.
+Path to the directory where
+.Nm
+will find its configuration data.
 See
 .Sx FILES
 and
@@ -74,18 +76,17 @@ This command makes a ready-to-export package tree, and fills it with
 binary packages built from a given list of ports.
 During the build, hit ^T to send
 .Dv SIGINFO
-and get stats and progress back.
+and show stats and progress about the build.
 .It image
-This command allows you to create images.
+This command creates images.
 .It jail
-This command allows you to manage the jails used by
+This command manages the
 .Nm
-which are building environments differing by OS version and architecture.
+jails which are used as different building environments.
 .It ports
-This command allows you to manage different portstrees which will be used
+This command provides management of different portstrees which will be used
 by
-.Nm
-(create, update and delete portstrees).
+.Nm .
 .It testport
 This command, mainly targeted at ports developers, launches a
 test on a given port (useful before submitting/committing a port).
@@ -266,7 +267,7 @@ See
 for examples of how this is used.
 .El
 .Ss image
-WARNING: This is still considered as ALPHA.
+WARNING: This feature is still considered ALPHA.
 .Bl -tag -width "-f packagelist"
 .It Fl c Ar overlaydir
 This specifies an extra directory whose contents will be copied directly into
@@ -289,25 +290,25 @@ This argument specifies directory where the resulting image will be created.
 .It Fl p Ar tree
 This argument specifies the name of the ports tree that is used.
 .It Fl s Ar size
-This specifies the maximum size of the image that gets build.
+This specifies the maximum size of the image that is built.
 .It Fl t Ar type
 This specifies the type of image to create:
 .Bl -tag -width "rawfirmware"
 .It iso
 An ISO 9660 format image.
 .It iso+mfs
-An ISO 9660 format image where the root filesystem gets MFS mounted.
+An ISO 9660 format image where the root filesystem is MFS mounted.
 .It iso+zmfs
-An ISO 9660 format image where the root filesystem is LZ77 compressed and gets MFS
+An ISO 9660 format image where the root filesystem is LZ77 compressed and is MFS
 mounted.
 .It usb
 A GPT-layout prepared UFS2 image containing a UEFI boot loader.
 .It usb+mfs
 A GPT-layout prepared UFS2 image containing a UEFI boot loader where the root
-filesystem gets MFS mounted.
+filesystem is MFS mounted.
 .It usb+zmfs
 A GPT-layout prepared UFS2 image containing a UEFI boot loader where the root
-filesystem is LZ77 compressed and gets MFS mounted.
+filesystem is LZ77 compressed and is MFS mounted.
 .It rawdisk
 A raw UFS2, softupdates-enabled, disk image.
 .It zrawdisk
@@ -773,7 +774,7 @@ Multiple
 .Fl f Ar file
 arguments may be specified at once.
 .It cat/port cat/port2 ...
-A list of ports can be specified directly.
+A list of ports can be specified on the command line.
 .El
 .Pp
 Here are the options associated with the
@@ -1004,7 +1005,7 @@ This directory contains various configuration files for the different jails.
 .Sh EXIT STATUS
 .Ex -std
 .Sh EXAMPLES
-.Ss bulk build of binary packages
+.Ss Bulk build of specific binary packages
 This first example provides a guide on how to use
 .Nm
 for bulk build packages.
@@ -1031,8 +1032,8 @@ you can create a lot of them.
 It will install the jail under the pool
 you have chosen, at poudriere/jailname.
 .Pp
-You also need to have at least one ports tree to build packages from it,
-so let us take the default configuration by creating a ports tree.
+You also need to have at least one ports tree to build packages from,
+so let us take the default configuration and create a ports tree.
 .Pp
 .Dl "poudriere ports -c"
 .Pp
@@ -1041,7 +1042,8 @@ A ports tree will take approximately 4GB of space.
 .Bq Specify a list of ports you want to build
 .Pp
 Create a flat text file in which you put the ports you want to see
-built by poudriere.
+built by
+.Nm :
 .Pp
 .Dl "echo 'sysutils/screen' > ~/pkglist"
 .Dl "echo 'editors/vim' >> ~/pkglist"
@@ -1051,9 +1053,8 @@ Any line starting with the hash sign will be treated as a comment.
 .Bq Launch the bulk build
 .Pp
 Now you can launch the bulk build.
-You can specify to build for only one
-arch/version ; by default it will make the bulk build on all the jails
-created by poudriere.
+At minimum the jail and list of packages to build must be specified.
+.Pp
 .Dl "poudriere bulk -f ~/pkglist -j 81i386"
 .Pp
 .Bq Find your packages
@@ -1063,7 +1064,7 @@ Once the bulk build is over, you can meet your shiny new packages here:
 .Dl Pa /usr/local/poudriere/data/packages/81i386
 .Pp
 with 81i386 as the name of the jail.
-.Ss test a single port
+.Ss Test a single port
 This second example show how to use
 .Nm
 for a single port.
@@ -1080,7 +1081,9 @@ package dir (pourdriere/data/packages/<jailname>-<tree>-<setname>), then it moun
 (except runtime ones) and log it to
 poudriere/data/logs/testport/jailname/default/mybeautifulporttotest.log).
 .Pp
-If packages for the dependencies already exists it will use them
+If packages for the dependencies already exist, then
+.Nm
+will use them.
 .Pp
 When all the dependencies are built, packages for them are created so
 that next time it will be faster.
@@ -1091,15 +1094,14 @@ After that it will build the port itself with LOCALBASE != PREFIX
 and log the build to
 poudriere/data/logs/testport/jailname/default/mybeautifulporttotest.log
 .Pp
-It will try to:
+Poudriere will try to:
 install it,
 create a package from it,
 deinstall it,
 check for cruft left behind and
 propose the line to add to pkg-plist if needed.
 .Pp
-It is very easy to extend it so that we can easily add other tests if
-wanted.
+Poudriere is very easy to extend so that additional tests can be easily added.
 .Sh FLAVORS
 .Cm bulk -a
 will build all FLAVORS for each port.
@@ -1288,7 +1290,7 @@ Be careful to respect the names supported by jail(8):
 .Ed
 .Pp
 Be also careful to not begin the name of the jail by a number if you are
-not in -stable or current:
+not running FreeBSD 9.0 or later:
 .Pp
 .Lk http://svn.freebsd.org/viewvc/base?view=revision&revision=209820
 .Sh BUGS

@@ -160,6 +160,7 @@ relpath() {
 	echo "${_relpath}"
 }
 
+if [ "$(type trap_push 2>/dev/null)" != "trap_push is a shell builtin" ]; then
 trap_push() {
 	local -; set +x
 	[ $# -eq 2 ] || eargs trap_push signal var_return
@@ -193,7 +194,7 @@ trap_pop() {
 	local _trap="$2"
 
 	if [ -n "${_trap}" ]; then
-		eval trap -- ${_trap} ${signal} || :
+		eval trap -- "${_trap}" ${signal} || :
 	else
 		return 1
 	fi
@@ -248,6 +249,7 @@ critical_end() {
 		kill -TERM $(sh -c 'echo ${PPID}')
 	fi
 }
+fi
 
 # Read a file until 0 status is found. Partial reads not accepted.
 read_line() {
@@ -265,7 +267,7 @@ read_line() {
 
 		# Read until a full line is returned.
 		until [ ${reads} -eq ${max_reads} ] || \
-		    read -t 1 -r line < "${file}"; do
+		    IFS= read -t 1 -r line < "${file}"; do
 			sleep 0.1
 			reads=$((${reads} + 1))
 		done
@@ -307,7 +309,7 @@ prefix_stderr_quick() {
 				    >&2
 			else
 				setproctitle "${PROC_TITLE} (prefix_stderr_quick)"
-				while read -r line; do
+				while IFS= read -r line; do
 					msg_warn "${extra}: ${line}"
 				done
 			fi
@@ -333,7 +335,7 @@ prefix_stderr() {
 		(
 			set +x
 			setproctitle "${PROC_TITLE} (prefix_stderr)"
-			while read -r line; do
+			while IFS= read -r line; do
 				msg_warn "${extra}: ${line}"
 			done
 		) < ${prefixpipe} &
@@ -375,7 +377,7 @@ prefix_stdout() {
 		(
 			set +x
 			setproctitle "${PROC_TITLE} (prefix_stdout)"
-			while read -r line; do
+			while IFS= read -r line; do
 				msg "${extra}: ${line}"
 			done
 		) < ${prefixpipe} &

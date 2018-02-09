@@ -264,13 +264,18 @@ post_getopts() {
 }
 
 _mastermnt() {
-	local hashed_name mnt mnttest mnamelen testpath
+	local hashed_name mnt mnttest mnamelen testpath mastername
 
 	mnamelen=$(grep "#define[[:space:]]MNAMELEN" \
 	    /usr/include/sys/mount.h 2>/dev/null | awk '{print $3}')
 	: ${mnamelen:=88}
 
-	mnt="${POUDRIERE_DATA}/.m/${MASTERNAME}/ref"
+	# Avoid : which causes issues with PATH for non-jailed commands
+	# like portlint in testport.
+	mastername="${MASTERNAME}"
+	_gsub "${mastername}" ":" "_"
+	mastername="${_gsub}"
+	mnt="${POUDRIERE_DATA}/.m/${mastername}/ref"
 	if [ -z "${NOLINUX}" ]; then
 		testpath="/compat/linux/proc"
 	else
@@ -893,7 +898,7 @@ read_file() {
 		fi
 	else
 		while :; do
-			read -r line
+			IFS= read -r line
 			ret=$?
 			case ${ret} in
 				# Success, process data and keep reading.
@@ -1504,7 +1509,7 @@ markfs() {
 		# remove old snapshot if exists
 		zfs destroy -r ${fs}@${name} 2>/dev/null || :
 		rollback_file "${mnt}" "${name}" snapfile
-		unlink "${snapfile}" >/dev/null 2>&1 || :
+		unlink "${snapfile}" || :
 		#create new snapshot
 		zfs snapshot ${fs}@${name}
 		# Mark that we are in this snapshot, which rollbackfs
@@ -4611,10 +4616,6 @@ pkg_get_options() {
 			_compiled_options="${_compiled_options} "
 		fi
 		shash_set 'pkg' 'options' "${_compiled_options}"
-	else
-		# Space on end to match 'pretty-print-config' in delete_old_pkg
-		[ -n "${_compiled_options}" ] &&
-		    _compiled_options="${_compiled_options} "
 	fi
 	if [ -n "${var_return}" ]; then
 		setvar "${var_return}" "${_compiled_options}"
@@ -4648,14 +4649,16 @@ pkg_cache_data() {
 	local _ignored
 
 	ensure_pkg_installed || return 1
-	pkg_get_options '' "${pkg}" > /dev/null
-	pkg_get_origin '' "${pkg}" "${origin}" > /dev/null
-	if have_ports_feature FLAVORS; then
-		pkg_get_flavor '' "${pkg}" "${flavor}" > /dev/null
-	elif have_ports_feature DEPENDS_ARGS; then
-		pkg_get_dep_args '' "${pkg}" "${dep_args}" > /dev/null
-	fi
-	pkg_get_dep_origin_pkgnames '' '' "${pkg}" > /dev/null
+	{
+		pkg_get_options '' "${pkg}"
+		pkg_get_origin '' "${pkg}" "${origin}"
+		if have_ports_feature FLAVORS; then
+			pkg_get_flavor '' "${pkg}" "${flavor}"
+		elif have_ports_feature DEPENDS_ARGS; then
+			pkg_get_dep_args '' "${pkg}" "${dep_args}"
+		fi
+		pkg_get_dep_origin_pkgnames '' '' "${pkg}"
+	} >/dev/null
 }
 
 pkg_cacher_queue() {
@@ -4678,7 +4681,7 @@ pkg_cacher_main() {
 
 	# Wait for packages to process.
 	while :; do
-		read -r work <&6
+		IFS= read -r work <&6
 		eval $(decode_args work)
 		origin="$1"
 		pkgname="$2"
@@ -5180,7 +5183,7 @@ pkgqueue_add_dep() {
 pkgqueue_clean_rdeps() {
 	[ "${PWD}" = "${MASTERMNT}/.p" ] || \
 	    err 1 "pkgqueue_clean_rdeps requires PWD=${MASTERMNT}/.p"
-	[ $# -eq 2 ] || eargs pkgqueue_clean_rdeps pkgclean clean_rdepends
+	[ $# -eq 2 ] || eargs pkgqueue_clean_rdeps clean_rdepends
 	local pkgname="$1"
 	local clean_rdepends="$2"
 	local dep_dir dep_pkgname pkg_dir_name
@@ -5242,7 +5245,7 @@ pkgqueue_clean_rdeps() {
 pkgqueue_clean_deps() {
 	[ "${PWD}" = "${MASTERMNT}/.p" ] || \
 	    err 1 "pkgqueue_clean_deps requires PWD=${MASTERMNT}/.p"
-	[ $# -eq 2 ] || eargs pkgqueue_clean_deps pkgclean clean_rdepends
+	[ $# -eq 2 ] || eargs pkgqueue_clean_deps clean_rdepends
 	local pkgname="$1"
 	local clean_rdepends="$2"
 	local dep_dir rdep_pkgname pkg_dir_name
@@ -5276,7 +5279,7 @@ pkgqueue_clean_deps() {
 pkgqueue_clean_pool() {
 	[ "${PWD}" = "${MASTERMNT}/.p" ] || \
 	    err 1 "pkgqueue_clean_pool requires PWD=${MASTERMNT}/.p"
-	[ $# -eq 2 ] || eargs pkgqueue_clean_pool pkgclean clean_rdepends
+	[ $# -eq 2 ] || eargs pkgqueue_clean_pool clean_rdepends
 	local pkgname="$1"
 	local clean_rdepends="$2"
 
@@ -5490,7 +5493,7 @@ port_var_fetch() {
 	set -- ${_vars}
 	varcnt=$#
 	shiftcnt=0
-	while read -r _line; do
+	while IFS= read -r _line; do
 		if [ "${_line% *}" = "${_errexit}" ]; then
 			ret=${_line#* }
 			# Encountered an error, abort parsing anything further.
@@ -5624,7 +5627,7 @@ set_dep_fatal_error() {
 
 clear_dep_fatal_error() {
 	unset DEP_FATAL_ERROR
-	unlink ${DEP_FATAL_ERROR_FILE} 2>/dev/null || :
+	unlink ${DEP_FATAL_ERROR_FILE} || :
 	export ERRORS_ARE_DEP_FATAL=1
 }
 
@@ -6423,10 +6426,14 @@ origin_should_use_dep_args() {
 }
 
 listed_ports() {
-	_listed_ports "$@" | while read originspec; do
-		map_py_slave_port "${originspec}" originspec || :
-		echo "${originspec}"
-	done
+	if have_ports_feature DEPENDS_ARGS; then
+		_listed_ports "$@" | while read originspec; do
+			map_py_slave_port "${originspec}" originspec || :
+			echo "${originspec}"
+		done
+		return
+	fi
+	_listed_ports "$@"
 }
 _listed_ports() {
 	local tell_moved="${1}"
@@ -7224,9 +7231,8 @@ balance_pool() {
 		# This races with pkgqueue_get_next(), just ignore failure
 		# to move it.
 		rename "${pkg_dir}" \
-		    "pool/${dep_count}/${pkgname}" \
-		    2>/dev/null || :
-	done
+		    "pool/${dep_count}/${pkgname}" || :
+	done 2>/dev/null
 	# New files may have been added in unbalanced/ via pkgqueue_done() due
 	# to not being locked. These will be picked up in the next run.
 
