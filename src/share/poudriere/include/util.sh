@@ -24,6 +24,15 @@
 
 : ${ENCODE_SEP:=$'\002'}
 
+if ! type eargs 2>/dev/null >&2; then
+	eargs() {
+		local badcmd="$1"
+		shift
+		echo "Bad arguments, ${badcmd}: ""$@" >&2
+		exit 1
+	}
+fi
+
 # Encode $@ for later decoding
 encode_args() {
 	local -; set +x
@@ -49,16 +58,47 @@ encode_args() {
 # Decode data from encode_args
 # Usage: eval $(decode_args data_var_name)
 decode_args() {
-	local -; set +x
+	local -; set +x -f
 	[ $# -eq 1 ] || eargs decode_args encoded_args_var
 	local encoded_args_var="$1"
 
-	# IFS="${ENCODE_SEP}"
-	# set -- ${data}
-	# unset IFS
-
-	echo "IFS=\"\${ENCODE_SEP}\"; set -- \${${encoded_args_var}}; unset IFS"
+	# oldIFS="${IFS}"; IFS="${ENCODE_SEP}"; set -- ${data}; IFS="${oldIFS}"; unset oldIFS
+	echo "oldIFS=\"\${IFS}\"; IFS=\"\${ENCODE_SEP}\"; set -- \${${encoded_args_var}}; IFS=\"\${oldIFS}\"; unset oldIFS"
 }
+
+if ! type issetvar >/dev/null 2>&1; then
+issetvar() {
+	[ $# -eq 1 ] || eargs issetvar
+	local var="$1"
+	local _evalue
+
+	eval "_evalue=\${${var}-__null}"
+
+	[ "${_evalue}" != "__null" ]
+}
+fi
+
+if ! type getvar >/dev/null 2>&1; then
+getvar() {
+	[ $# -eq 2 ] || eargs getvar var var_return
+	local var="$1"
+	local var_return="$2"
+	local ret _evalue
+
+	eval "_evalue=\${${var}-__null}"
+
+	if [ "${_evalue}" = "__null" ]; then
+		_evalue=
+		ret=1
+	else
+		ret=0
+	fi
+
+	setvar "${var_return}" "${_evalue}"
+
+	return ${ret}
+}
+fi
 
 # Given 2 directories, make both of them relative to their
 # common directory.
@@ -117,7 +157,7 @@ relpath_common() {
 
 # Given 2 paths, return the relative path from the 2nd to the first
 _relpath() {
-	local -; set +x
+	local -; set +x -f
 	[ $# -eq 2 ] || eargs _relpath dir1 dir2
 	local dir1="$1"
 	local dir2="$2"
@@ -250,6 +290,65 @@ critical_end() {
 	fi
 }
 fi
+
+# Read a file into the given variable.
+read_file() {
+	[ $# -eq 2 ] || eargs read_file var_return file
+	local var_return="$1"
+	local file="$2"
+	local _data _line newline
+	local ret -
+
+	# var_return may be empty if only $_read_file_lines_read is being
+	# used.
+
+	set +e
+	_data=
+	_read_file_lines_read=0
+	newline=$'\n'
+
+	if [ ! -f "${file}" ]; then
+		if [ -n "${var_return}" ]; then
+			setvar "${var_return}" ""
+		fi
+		return 1
+	fi
+
+	if [ ${READ_FILE_USE_CAT:-0} -eq 1 ]; then
+		if [ -n "${var_return}" ]; then
+			_data="$(cat "${file}")"
+		fi
+		_read_file_lines_read=$(wc -l < "${file}")
+		_read_file_lines_read=${_read_file_lines_read##* }
+		ret=0
+	else
+		while :; do
+			IFS= read -r _line
+			ret=$?
+			case ${ret} in
+				# Success, process data and keep reading.
+				0) ;;
+				# EOF
+				1)
+					ret=0
+					break
+					;;
+				# Some error or interruption/signal. Reread.
+				*) continue ;;
+			esac
+			if [ -n "${var_return}" ]; then
+				_data="${_data:+${_data}${newline}}${_line}"
+			fi
+			_read_file_lines_read=$((${_read_file_lines_read} + 1))
+		done < "${file}" || ret=$?
+	fi
+
+	if [ -n "${var_return}" ]; then
+		setvar "${var_return}" "${_data}"
+	fi
+
+	return ${ret}
+}
 
 # Read a file until 0 status is found. Partial reads not accepted.
 read_line() {

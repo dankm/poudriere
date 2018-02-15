@@ -161,7 +161,8 @@ _reap_children() {
 		if ! kill -0 ${pid}; then
 			# This will error out if the return status is non-zero
 			_wait ${pid} || ret=$?
-			list_remove PARALLEL_PIDS "${pid}"
+			list_remove PARALLEL_PIDS "${pid}" || \
+			    err 1 "_reap_children did not find ${pid} in PARALLEL_PIDS"
 		fi
 	done 2>/dev/null
 
@@ -178,7 +179,7 @@ parallel_stop() {
 		_wait ${PARALLEL_PIDS} || ret=$?
 	fi
 
-	exec 9<&- 9>&-
+	exec 9>&-
 	unset PARALLEL_PIDS
 	unset NBPARALLEL
 
@@ -293,7 +294,7 @@ nohang() {
 		fi
 	done
 
-	exec 8<&- 8>&-
+	exec 8>&-
 
 	unlink ${pidfile} || :
 
