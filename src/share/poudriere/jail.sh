@@ -449,6 +449,7 @@ buildworld() {
 	setup_build_env
 
 	msg "Starting make buildworld with ${PARALLEL_JOBS} jobs"
+	msg "With MAKEWORLDARGS=${MAKEWORLDARGS}"
 	${MAKE_CMD} -C ${SRC_BASE} buildworld ${MAKE_JOBS} \
 	    ${MAKEWORLDARGS} || err 1 "Failed to 'make buildworld'"
 	BUILTWORLD=1
