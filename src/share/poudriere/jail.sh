@@ -613,7 +613,7 @@ install_from_vcs() {
 	case ${METHOD} in
 	git*)
 		if [ ! -e "${SRC_BASE}/.git/shallow" ]; then
-			${GIT_CMD} -C ${SRC_BASE} gc --prune=all --aggressive --quiet || err 1 " fail"
+			${GIT_CMD} -C ${SRC_BASE} -c gc.auto=10 gc --auto --quiet || err 1 " fail"
 		fi
 	;;
 	esac
