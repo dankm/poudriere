@@ -610,6 +610,13 @@ install_from_vcs() {
 	setvar "${var_version_extra}" \
 	    "$(awk '/^\#define[[:blank:]]__FreeBSD_version/ {print $3}' \
 	    ${JAILMNT}/usr/include/sys/param.h)"
+	case ${METHOD} in
+	git*)
+		if [ ! -e "${SRC_BASE}/.git/shallow" ]; then
+			${GIT_CMD} -C ${SRC_BASE} gc --prune=all --aggressive --quiet || err 1 " fail"
+		fi
+	;;
+	esac
 }
 
 install_from_ftp() {
